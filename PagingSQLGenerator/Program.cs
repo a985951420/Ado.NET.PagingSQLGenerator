@@ -7,18 +7,18 @@ namespace PagingSQLGenerator
     {
         static void Main(string[] args)
         {
-            var page = new Paging();
-            page.Body("SELECT Id,A,B,C FROM A");
-            page.Where("A", Paging.ParameterType.Equal, "big");
-
+            var page = new Paging(Paging.PagingType.OFFSET);
+            var value = 1M;
+            page.Body("SELECT * FROM ORDERS");
+            page.Where("IsLocked", ParameterType.Equal, value);
             page.OrArea((parameter) =>
             {
-                parameter.Where("B", Paging.ParameterType.LeftLike, Paging.ParameterLinkType.OR, "A");
-                parameter.Where("B", Paging.ParameterType.LeftLike, Paging.ParameterLinkType.OR, "B");
+                parameter.Where("OrderNumber", ParameterType.LeftLike, ParameterLinkType.OR, "B");
             });
             page.OrderByDescending("Id");
             page.Page(1, 10);
             var sql = page.ToString();
+            var esql = page.ExecuteSql();
             var parameters = page.GetParameters();
             var count = page.Count();
 

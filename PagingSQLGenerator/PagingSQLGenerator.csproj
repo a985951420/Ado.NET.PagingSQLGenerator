@@ -43,8 +43,10 @@
     <Reference Include="System.Xml" />
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="Page\PaginEnum.cs" />
     <Compile Include="Page\Paging.cs" />
     <Compile Include="Page\PagingOrArea.cs" />
+    <Compile Include="Page\PagingParameterConfiguration.cs" />
     <Compile Include="Program.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>

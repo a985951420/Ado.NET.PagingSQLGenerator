@@ -14,21 +14,77 @@ namespace PagingSQLGenerator.Page
     public class Paging
     {
         /// <summary>
+        /// 分页前缀
+        /// </summary>
+        readonly string prefix = string.Empty;
+        PagingType _pageType;
+        public enum PagingType
+        {
+            /// <summary>
+            /// 低版本12一下
+            /// </summary>
+            RowNumber,
+            /// <summary>
+            /// 12及以上版本
+            /// </summary>
+            OFFSET
+        }
+        public Paging() : this(PagingType.RowNumber)
+        {
+        }
+
+        public Paging(PagingType pagingType)
+        {
+            prefix = Str_char(5);
+            _pageType = pagingType;
+        }
+        /// <summary>
         /// 参数占位符
         /// </summary>
-        private const string _param = "@AutoParameter_";
+        private string _param
+        {
+            get
+            {
+                return $"@{prefix}AutoParameter_";
+            }
+        }
+        /// <summary>
+        /// rowNumber
+        /// </summary>
+        string _rowNumberName
+        {
+            get
+            {
+                return $"[{prefix}_RowNumber]";
+            }
+        }
         /// <summary>
         /// SQL参数化
         /// </summary>
-        Dictionary<string, string> _Tsql = new Dictionary<string, string>
+        Dictionary<string, string> _Tsql
+        {
+            get
             {
-                { "orderBydescending", " ORDER BY {0} DESC "},  //排序SQL 正序
-                { "orderBy"," ORDER BY {0} ASC "},  //排序SQL倒序
-                { "page"," OFFSET {0} ROWS FETCH NEXT {1} ROWS ONLY "},//分页SQL
-                { "count"," SELECT COUNT(1) FROM ( {0}  {1} ) paging_autoTable "},//总条数
-                { "parameter"," {0} {1} {2} "+_param+"{3} "},//参数化
-                { "parameterBetweenAnd"," {0} {1} Between  " + _param + "{2} AND " + _param + "{3} " },//Between And 
-            };
+                var dic = new Dictionary<string, string>()
+                {
+                    //排序SQL 正序
+                    { "orderBydescending", " ORDER BY {0} DESC "},  
+                    //排序SQL倒序
+                    { "orderBy"," ORDER BY {0} ASC "},
+                    //分页SQL
+                    { "pageoffset"," OFFSET {0} ROWS FETCH NEXT {1} ROWS ONLY "},
+                    //分页SQL
+                    { "pagenumber"," SELECT * FROM(SELECT *, ROW_NUMBER() OVER ({0}) AS " + _rowNumberName + " FROM ({1}) paging_autoTable) AS paging_rowTable  {2}"},
+                    //总条数
+                    { "count"," SELECT COUNT(1) FROM ( {0}  {1} ) paging_autoTable "},
+                    //参数化
+                    { "parameter"," {0} {1} {2} " + _param + "{3} "},
+                    //Between And 
+                    { "parameterBetweenAnd"," {0} {1} Between  " + _param + "{2} AND " + _param + "{3} " },
+                };
+                return dic;
+            }
+        }
         /// <summary>
         /// 排序
         /// </summary>
@@ -67,7 +123,6 @@ namespace PagingSQLGenerator.Page
                 throw new Exception("应该存在排序字段！");
             _orderByBuilder.AppendFormat(_Tsql["orderBy"], columnName);
         }
-
         /// <summary>
         /// 分页
         /// </summary>
@@ -78,10 +133,21 @@ namespace PagingSQLGenerator.Page
         {
             if (_paging.Length > 0)
                 throw new Exception("已存在分页！");
+            if (pageIndex == 0)
+                pageIndex += 1;
             var startPage = (pageIndex - 1) * pageSize;
-            _paging.AppendFormat(_Tsql["page"], startPage, pageSize);
+            switch (_pageType)
+            {
+                case PagingType.RowNumber:
+                    Where(_rowNumberName, ParameterType.BetweenAnd, startPage, pageSize);
+                    break;
+                case PagingType.OFFSET:
+                    _paging.AppendFormat(_Tsql["pageoffset"], startPage, pageSize);
+                    break;
+                default:
+                    break;
+            }
         }
-
         /// <summary>
         /// 查询SQL
         /// </summary>
@@ -124,7 +190,7 @@ namespace PagingSQLGenerator.Page
         {
             if (_tSql.Length <= 0)
                 throw new Exception("请添加查询！");
-            var countSql = string.Format(_Tsql["count"], _tSql, whereSql);
+            var countSql = string.Format(_Tsql["count"], _tSql, countWhereSql);
             var sb = new StringBuilder();
             sb.Append("---------------------TSQL-Count--------------------------" + Environment.NewLine);
             sb.AppendFormat("Sql : {0}", countSql + Environment.NewLine);
@@ -194,14 +260,36 @@ namespace PagingSQLGenerator.Page
             {
                 if (_orderByBuilder.Length <= 0)
                     throw new Exception("请添加排序！");
-                if (_paging.Length <= 0)
-                    throw new Exception("请添加分页！");
+                if (_pageType == PagingType.OFFSET)
+                {
+                    if (_paging.Length <= 0)
+                        throw new Exception("请添加分页！");
+                }
+                else
+                {
+                    var any = parameters.Any(s => s.Any(c => c.ColumnName == _rowNumberName));
+                    if (!any)
+                        throw new Exception("请添加分页！");
+                }
                 if (_tSql.Length <= 0)
                     throw new Exception("请添加查询！");
-
-                return $"{_tSql}  {whereSql} {_orderByBuilder} {_paging}";
+                switch (_pageType)
+                {
+                    case PagingType.RowNumber:
+                        return string.Format(_Tsql["pagenumber"], _orderByBuilder, _tSql, whereSql, _paging);
+                    case PagingType.OFFSET:
+                        return $"{_tSql}  {whereSql} {_orderByBuilder} {_paging}";
+                    default:
+                        throw new Exception("SQL分页不兼容");
+                }
             }
         }
+
+        /// <summary>
+        /// 默认不是Count信号
+        /// </summary>
+        bool countSign = false;
+
         /// <summary>
         /// Where SQL
         /// </summary>
@@ -213,10 +301,21 @@ namespace PagingSQLGenerator.Page
                 var where = new StringBuilder(" Where 1=1 ");
                 foreach (var item in parameters)
                 {
+                    if (countSign)
+                    {
+                        var notRowNameCount = item.Count(s => s.ColumnName != _rowNumberName);
+                        if (notRowNameCount <= 0)
+                            continue;
+                    }
                     var parametersIndex = 0;
                     where.Append(" AND ( ");
                     foreach (var pitem in item.Where(s => s.AutoAppend))
                     {
+                        if (countSign)
+                        {
+                            if (pitem.ColumnName == _rowNumberName)
+                                continue;
+                        }
                         var psymbol = string.Empty;
                         if (parametersIndex != 0)
                         {
@@ -241,7 +340,6 @@ namespace PagingSQLGenerator.Page
                             case ParameterType.RightLike:
                             case ParameterType.LeftLike:
                                 where.AppendFormat(tsql, psymbol, pitem.ColumnName, "LIKE", index);
-                                index++;
                                 break;
                             case ParameterType.IN:
                                 var parameters = new List<string>();
@@ -274,12 +372,29 @@ namespace PagingSQLGenerator.Page
                         }
                         parametersIndex++;
                     }
-
                     where.Append(" ) ");
                 }
                 return where.ToString();
             }
         }
+
+        /// <summary>
+        /// count 条件设置 Where SQL
+        /// </summary>
+        string countWhereSql
+        {
+            get
+            {
+                //设置Count查询去除RowNumber条件
+                countSign = true;
+                var sql = whereSql;
+                //恢复默认添加RowNumber条件
+                countSign = false;
+                return sql;
+            }
+        }
+
+
         /// <summary>
         /// 追加条件
         /// </summary>
@@ -334,6 +449,39 @@ namespace PagingSQLGenerator.Page
             return _SQL;
         }
 
+        public string ExecuteSql()
+        {
+            var temp = @"DECLARE {0} {1};SET {0} = '{2}';";
+            var parameters = GetParameters();
+            var sqlSb = new StringBuilder();
+            foreach (var item in parameters)
+            {
+                var v = item.Value.GetType();
+                if (!DataType.ContainsKey(v))
+                    throw new Exception($"不支持类型转TSQL:【{v.Name}】");
+                var valueType = DataType[v];
+                if (v.Equals(typeof(string)))
+                    valueType = string.Format(valueType, ((string)item.Value).Length);
+                sqlSb.AppendFormat(temp, item.Key, valueType, item.Value);
+            }
+            sqlSb.AppendLine(_SQL);
+            return sqlSb.ToString();
+        }
+
+        public Dictionary<Type, string> DataType = new Dictionary<Type, string>
+        {
+            { typeof(Boolean), "Bit"},
+            { typeof(Char), "Char"},
+            { typeof(DateTime), "DateTime"},
+            { typeof(DateTimeOffset), "DateTimeOffset"},
+            { typeof(Decimal), "Decimal"},
+            { typeof(Guid), "UniqueIdentifier"},
+            { typeof(Int16), "SmallInt"},
+            { typeof(Int32), "Int"},
+            { typeof(Int64), "BigInt"},
+            { typeof(String), "NVarChar({0})"},
+        };
+
         /// <summary>
         /// 所有参数
         /// </summary>
@@ -346,92 +494,33 @@ namespace PagingSQLGenerator.Page
         }
 
         /// <summary>
-        /// 分页参数配置
+        /// 生成随机纯字母随机数
         /// </summary>
-        public class PagingParameterConfiguration
+        /// <param name="IntStr">生成长度</param>
+        /// <returns></returns>
+        public string Str_char(int Length)
         {
-            /// <summary>
-            /// 参数名
-            /// </summary>
-            public string ColumnName { get; set; }
-            /// <summary>
-            /// 值
-            /// </summary>
-            public object[] Values { get; set; }
-            /// <summary>
-            /// 是否自动追加
-            /// </summary>
-            public bool AutoAppend { get; set; }
-            /// <summary>
-            /// 连接类型
-            /// </summary>
-            public ParameterLinkType LinkType { get; set; }
-            /// <summary>
-            /// 值类型
-            /// </summary>
-            public ParameterType ParameterType { get; set; }
+            return Str_char(Length, false);
         }
-
         /// <summary>
-        /// 查询值类型
+        /// 生成随机纯字母随机数
         /// </summary>
-        public enum ParameterType
+        /// <param name="Length">生成长度</param>
+        /// <param name="Sleep">是否要在生成前将当前线程阻止以避免重复</param>
+        /// <returns></returns>
+        public string Str_char(int Length, bool Sleep)
         {
-            /// <summary>
-            /// 等于
-            /// </summary>
-            Equal,
-            /// <summary>
-            /// LIKE
-            /// </summary>
-            LIKE,
-            /// <summary>
-            /// RightLike
-            /// </summary>
-            RightLike,
-            /// <summary>
-            /// LeftLike
-            /// </summary>
-            LeftLike,
-            /// <summary>
-            /// IN
-            /// </summary>
-            IN,
-            /// <summary>
-            /// 区间
-            /// </summary>
-            BetweenAnd,
-            /// <summary>
-            /// 大于
-            /// </summary>
-            GreaterThan,
-            /// <summary>
-            /// 大于等于
-            /// </summary>
-            GreaterThanEqual,
-            /// <summary>
-            /// 小于
-            /// </summary>
-            Lessthan,
-            /// <summary>
-            /// 小于等于
-            /// </summary>
-            LessThanEqual,
-        }
-
-        /// <summary>
-        /// 条件连接
-        /// </summary>
-        public enum ParameterLinkType
-        {
-            /// <summary>
-            /// 并且
-            /// </summary>
-            AND,
-            /// <summary>
-            /// 或者
-            /// </summary>
-            OR
+            if (Sleep) System.Threading.Thread.Sleep(3);
+            char[] Pattern = new char[] { 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z' };
+            string result = "";
+            int n = Pattern.Length;
+            System.Random random = new Random(~unchecked((int)DateTime.Now.Ticks));
+            for (int i = 0; i < Length; i++)
+            {
+                int rnd = random.Next(0, n);
+                result += Pattern[rnd];
+            }
+            return result;
         }
     }
 }

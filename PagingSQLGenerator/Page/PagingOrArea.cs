@@ -8,12 +8,12 @@ namespace PagingSQLGenerator.Page
     /// </summary>
     public class PagingOrArea
     {
-        List<Paging.PagingParameterConfiguration> _pagingParameterConfigurations;
+        List<PagingParameterConfiguration> _pagingParameterConfigurations;
         /// <summary>
         /// PagingOrArea
         /// </summary>
         /// <param name="pagingParameterConfigurations"></param>
-        public PagingOrArea(ref List<Paging.PagingParameterConfiguration> pagingParameterConfigurations)
+        public PagingOrArea(ref List<PagingParameterConfiguration> pagingParameterConfigurations)
         {
             _pagingParameterConfigurations = pagingParameterConfigurations;
         }
@@ -26,12 +26,12 @@ namespace PagingSQLGenerator.Page
         /// <param name="pagingParamType">连接类型</param>
         /// <param name="values">值</param>
         /// <returns></returns>
-        public void Where(string columnName, Paging.ParameterType parameterType, Paging.ParameterLinkType pagingParamType, params object[] values)
+        public void Where(string columnName, ParameterType parameterType, ParameterLinkType pagingParamType, params object[] values)
         {
             columnName = columnName.Trim();
             if (!new Regex(@"^\[.*\]$").IsMatch(columnName))
                 columnName = "[" + columnName + "]";
-            _pagingParameterConfigurations.Add(new Paging.PagingParameterConfiguration
+            _pagingParameterConfigurations.Add(new PagingParameterConfiguration
             {
                 ColumnName = columnName,
                 ParameterType = parameterType,
