@@ -1,7 +1,7 @@
 ```csharp  
  Ado.NET.PagingSQLGenerator
 
- var page = new Paging();  
+ var page = new Paging(Paging.PagingType.OFFSET);
  page.Body("SELECT Id,A,B,C FROM A");  
  page.Where("A", Paging.ParameterType.Equal, "big");  
 
