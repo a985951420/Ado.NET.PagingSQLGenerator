@@ -62,4 +62,23 @@
         /// </summary>
         OR
     }
+
+    /// <summary>
+    /// SQL 大小写
+    /// </summary>
+    public enum GrammarType
+    {
+        /// <summary>
+        /// 原始
+        /// </summary>
+        Original = 0,
+        /// <summary>
+        /// 大写
+        /// </summary>
+        UpperCase = 1,
+        /// <summary>
+        /// 小写
+        /// </summary>
+        LowerCase = 2
+    }
 }

@@ -11,13 +11,18 @@ namespace PagingSQLGenerator.Page
     /// author： Time
     /// 分页
     /// </summary>
-    public class Paging
+    public class Paging : IDisposable
     {
+        /// <summary>
+        /// 日志
+        /// </summary>
+        public Action<string> Log { get; set; }
         /// <summary>
         /// 分页前缀
         /// </summary>
         readonly string prefix = string.Empty;
         PagingType _pageType;
+        GrammarType _grammarType;
         public enum PagingType
         {
             /// <summary>
@@ -32,11 +37,11 @@ namespace PagingSQLGenerator.Page
         public Paging() : this(PagingType.RowNumber)
         {
         }
-
-        public Paging(PagingType pagingType)
+        public Paging(PagingType pagingType, GrammarType grammarType = GrammarType.Original)
         {
             prefix = Str_char(5);
             _pageType = pagingType;
+            _grammarType = grammarType;
         }
         /// <summary>
         /// 参数占位符
@@ -85,6 +90,7 @@ namespace PagingSQLGenerator.Page
                 return dic;
             }
         }
+
         /// <summary>
         /// 排序
         /// </summary>
@@ -101,6 +107,15 @@ namespace PagingSQLGenerator.Page
         /// 参数
         /// </summary>
         private readonly List<List<PagingParameterConfiguration>> parameters = new List<List<PagingParameterConfiguration>>();
+        /// <summary>
+        /// SQL格式化处理
+        /// </summary>
+        static Dictionary<GrammarType, Func<string, string>> FunSqlHandler = new Dictionary<GrammarType, Func<string, string>>
+        {
+            {GrammarType.Original,(sql) => { return sql; }  },
+            {GrammarType.UpperCase,(sql) => { return sql.ToUpper(); }  },
+            {GrammarType.LowerCase,(sql) => { return sql.ToLower(); }  },
+        };
         /// <summary>
         /// 倒序
         /// </summary>
@@ -159,7 +174,6 @@ namespace PagingSQLGenerator.Page
                 throw new Exception("查询已存在！");
             _tSql.Append($" {sql} ");
         }
-
         /// <summary>
         /// 条件
         /// </summary>
@@ -170,6 +184,19 @@ namespace PagingSQLGenerator.Page
         public void Where(string columnName, ParameterType parameterType = ParameterType.Equal, params object[] value)
         {
             AddSingleParameter(columnName, value, parameterType, ParameterLinkType.AND, true);
+        }
+        /// <summary>
+        /// 条件
+        /// </summary>
+        /// <param name="condition">条件</param>
+        /// <param name="columnName">参数名称</param>
+        /// <param name="parameterType">查询类型</param>
+        /// <param name="value">值</param>
+        /// <returns></returns>
+        public void WhereIf(bool condition, string columnName, ParameterType parameterType = ParameterType.Equal, params object[] value)
+        {
+            if (condition)
+                Where(columnName, parameterType, value);
         }
         /// <summary>
         /// 或者条件
@@ -250,7 +277,6 @@ namespace PagingSQLGenerator.Page
             }
             return param;
         }
-
         /// <summary>
         /// 分页SQL语句
         /// </summary>
@@ -273,23 +299,26 @@ namespace PagingSQLGenerator.Page
                 }
                 if (_tSql.Length <= 0)
                     throw new Exception("请添加查询！");
+                var finalSql = string.Empty;
                 switch (_pageType)
                 {
                     case PagingType.RowNumber:
-                        return string.Format(_Tsql["pagenumber"], _orderByBuilder, _tSql, whereSql, _paging);
+                        finalSql = string.Format(_Tsql["pagenumber"], _orderByBuilder, _tSql, whereSql, _paging);
+                        break;
                     case PagingType.OFFSET:
-                        return $"{_tSql}  {whereSql} {_orderByBuilder} {_paging}";
+                        finalSql = $"{_tSql}  {whereSql} {_orderByBuilder} {_paging}";
+                        break;
                     default:
                         throw new Exception("SQL分页不兼容");
                 }
+                var handler = FunSqlHandler[_grammarType];
+                return handler.Invoke(finalSql);
             }
         }
-
         /// <summary>
         /// 默认不是Count信号
         /// </summary>
         bool countSign = false;
-
         /// <summary>
         /// Where SQL
         /// </summary>
@@ -377,7 +406,6 @@ namespace PagingSQLGenerator.Page
                 return where.ToString();
             }
         }
-
         /// <summary>
         /// count 条件设置 Where SQL
         /// </summary>
@@ -393,8 +421,6 @@ namespace PagingSQLGenerator.Page
                 return sql;
             }
         }
-
-
         /// <summary>
         /// 追加条件
         /// </summary>
@@ -411,7 +437,7 @@ namespace PagingSQLGenerator.Page
             if (!new Regex(@"^\[.*\]$").IsMatch(columnName))
                 columnName = "[" + columnName + "]";
             parameters.Add(new List<PagingParameterConfiguration>
-                {
+            {
                     new PagingParameterConfiguration
                     {
                         ColumnName = columnName,
@@ -420,9 +446,8 @@ namespace PagingSQLGenerator.Page
                         LinkType = pagingParamType,
                         Values = values
                     }
-                });
+            });
         }
-
         /// <summary>
         /// 验证参数是否存在当前名称
         /// </summary>
@@ -432,24 +457,29 @@ namespace PagingSQLGenerator.Page
             if (parameters.Any(s => s.Any(c => c.ColumnName.ToLower() == columnName.ToLower())))
                 throw new Exception("已存在参数！参数添加重复。");
         }
-
         /// <summary>
         /// 生成SQL语句
         /// </summary>
         /// <returns></returns>
         public override string ToString()
         {
-            var sb = new StringBuilder();
-            sb.Append("---------------------TSQL-Page--------------------------" + Environment.NewLine);
-            sb.AppendFormat("Sql : {0}", _SQL + Environment.NewLine);
-            sb.Append("Parameters：" + Environment.NewLine);
-            sb.Append(string.Join(Environment.NewLine, GetParameters().Select(s => $"Key：【{s.Key}】 Value：【{s.Value}】")) + Environment.NewLine);
-            sb.Append("-----------------------------------------------------------" + Environment.NewLine);
-            Trace.WriteLine(sb.ToString());
+            if (Log != null)
+            {
+                var sb = new StringBuilder();
+                sb.Append("---------------------TSQL-Page--------------------------" + Environment.NewLine);
+                sb.AppendFormat("Sql : {0}", _SQL + Environment.NewLine);
+                sb.Append("Parameters：" + Environment.NewLine);
+                sb.Append(string.Join(Environment.NewLine, GetParameters().Select(s => $"Key：【{s.Key}】 Value：【{s.Value}】")) + Environment.NewLine);
+                sb.Append("-----------------------------------------------------------" + Environment.NewLine);
+                Log.Invoke(sb.ToString());
+            }
             return _SQL;
         }
-
-        public string ExecuteSql()
+        /// <summary>
+        /// 带参数可执行TSQL
+        /// </summary>
+        /// <returns></returns>
+        public string ExecuteTSql()
         {
             var temp = @"DECLARE {0} {1};SET {0} = '{2}';";
             var parameters = GetParameters();
@@ -467,21 +497,19 @@ namespace PagingSQLGenerator.Page
             sqlSb.AppendLine(_SQL);
             return sqlSb.ToString();
         }
-
-        public Dictionary<Type, string> DataType = new Dictionary<Type, string>
+        Dictionary<Type, string> DataType = new Dictionary<Type, string>
         {
-            { typeof(Boolean), "Bit"},
-            { typeof(Char), "Char"},
+            { typeof(bool), "Bit"},
+            { typeof(char), "Char"},
             { typeof(DateTime), "DateTime"},
             { typeof(DateTimeOffset), "DateTimeOffset"},
-            { typeof(Decimal), "Decimal"},
+            { typeof(decimal), "Decimal"},
             { typeof(Guid), "UniqueIdentifier"},
-            { typeof(Int16), "SmallInt"},
-            { typeof(Int32), "Int"},
-            { typeof(Int64), "BigInt"},
-            { typeof(String), "NVarChar({0})"},
+            { typeof(short), "SmallInt"},
+            { typeof(int), "Int"},
+            { typeof(long), "BigInt"},
+            { typeof(string), "NVarChar({0})"},
         };
-
         /// <summary>
         /// 所有参数
         /// </summary>
@@ -492,7 +520,6 @@ namespace PagingSQLGenerator.Page
             /// </summary>
             public List<PagingParameterConfiguration> PagingParameters { get; set; }
         }
-
         /// <summary>
         /// 生成随机纯字母随机数
         /// </summary>
@@ -522,5 +549,31 @@ namespace PagingSQLGenerator.Page
             }
             return result;
         }
+        public void Dispose()
+        {
+            Dispose(true);
+            GC.SuppressFinalize(this);
+        }
+        protected virtual void Dispose(bool disposing)
+        {
+            if (!m_disposed)
+            {
+                if (disposing)
+                {
+                    // Release managed resources
+                    DataType = null;
+                }
+
+                // Release unmanaged resources
+
+                m_disposed = true;
+            }
+        }
+
+        ~Paging()
+        {
+            Dispose(false);
+        }
+        private bool m_disposed;
     }
 }
