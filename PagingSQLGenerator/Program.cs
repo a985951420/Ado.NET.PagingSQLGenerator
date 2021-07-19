@@ -20,8 +20,8 @@ namespace PagingSQLGenerator
             };
             var orderNumber = string.Empty;
             bool? bl = null;
-            page.Body(@"SELECT * FROM dbo.Orders a
-                                  JOIN dbo.OrderLines b ON a.Id=b.OrderId");
+            page.Body(@"SELECT * FROM dbo.table1 a
+                                  JOIN dbo.table2 b ON a.Id=b.OrderId");
             page.WhereIf(bl != null, "IsLocked", ParameterType.Equal, bl);
             page.OrArea((parameter) =>
             {
